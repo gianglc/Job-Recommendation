@@ -1,0 +1,123 @@
+---
+title: "logistic"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load data
+data <- read.csv("../logistic_regression_data.csv")
+sub_data <- data[, c('exp_signal', 'edu_signal_min', 'edu_signal_max', 'skill_signal', 'skill_ratio_signal', 'Recommend')]
+```
+
+```{r}
+# Train test split
+require(caTools) 
+set.seed(123)   #  set seed to ensure you always have same random numbers generated
+sample = sample.split(sub_data,SplitRatio = 0.8) # splits the data in the ratio mentioned in SplitRatio. After splitting marks these rows as logical TRUE and the the remaining are marked as logical FALSE
+train1 =subset(sub_data,sample ==TRUE) # creates a training dataset named train1 with rows which are marked as TRUE
+test1=subset(sub_data, sample==FALSE)
+```
+
+```{r}
+library(corrplot)
+correlations <- cor(train1[,1:5])
+corrplot(correlations, method="number")
+```
+
+We find some pairs of variables with moderate correlation coefficients. First, edu_signal_max and edu_signal_min had a coefficient of 0.81, and skill_ratio_signal and skill_signal had a coefficient of 0.66. Therefore, we can conclude that there are correlation among the variables in the dataset.
+
+```{r}
+# First Order Logistic Model
+fit1 <- glm(formula = Recommend ~ exp_signal + edu_signal_min + edu_signal_max + skill_signal + skill_ratio_signal, data = train1, family = "binomial")
+summary(fit1)
+```
+
+Exp_signal, Edu_signal_min, and skill_ratio_signal is significantly important in the model
+
+```{r}
+# First-order Residual Curvature and Model Plot
+plot(fit1, which = c(1))
+```
+
+Overall, the residual distribution from our model appears to have little deviation from zero, so the distribution of the residuals is not concerning.
+We then apply stepwise to the model to remove some insignificant predictors and increase the AIC.
+
+```{r}
+# Model Selection
+fit2 = step (fit1, direction='both')
+summary(fit2)
+```
+
+After applying the stepwise regression, we find the best subset of predictors for Job Recommend is exp_signal, edu_signal_min, and skill_ratio_signal. This model has the lowest AIC (AIC = 116.19) compared to the first model (AIC = 118.6). 
+
+```{r}
+predpr = predict (fit2, type='response')
+predlogit = predict (fit2)
+plot (jitter (Recommend, 0.2) ~ predlogit, xlab="Predicted Logit", ylab="Job Recommend Probability", data = train1)
+pred.ord = order (predlogit)
+lines (predlogit[pred.ord], predpr[pred.ord])
+
+```
+
+The general plot of response vs. predicted indicates that the prediction resulted from the model seems to be going in the right direction. Observed probability is positively correlated with predicted logit, which follows the appropriate pattern. The observed recommend status of 0 (no recommend) tends to correspond to the lower predicted logit (which means lower probability of recommending), and the observed recommend status of 1 (recommend) tends to correspond to the higher predicted logit (which means higher possibility of recommending).
+
+```{r}
+par (mfrow=c(1,2))
+plot (fit2, which=c(1,5))
+```
+
+The residual plots above for model, fit2, look reasonable. In the first plot, the fitted lowess line is relatively close to zero. In the second plot, there are no obvious patterns nor obvious outliers in either 
+
+```{r}
+# ROC and AUC
+par (mfrow=c(1,1))
+fit3 = glm(Recommend ~ exp_signal + edu_signal_min +skill_ratio_signal , data = train1, family = binomial)
+library(ROCR)
+library("gplots")
+
+pred1 <- prediction(fit3$fitted.values, fit3$y)
+perf1 <- performance(pred1,"tpr","fpr")
+auc1 <- performance(pred1,"auc")@y.values[[1]]
+auc1
+
+```
+
+
+```{r}
+# roc.x = slot (perf1, "x.values") [[1]]
+# roc.y = slot (perf1, "y.values") [[1]]
+# cutoffs = slot (perf1, "alpha.values") [[1]]
+# 
+# auc.table = cbind.data.frame(cutoff=pred1@cutoffs, 
+#                              tp=pred1@tp, fp=pred1@fp, tn=pred1@tn, fn=pred1@fn)
+# names (auc.table) = c("Cutoff", "TP", "FP", "TN", "FN")
+# auc.table$sensitivity = auc.table$TP / (auc.table$TP + auc.table$FN)
+# auc.table$specificity = auc.table$TN / (auc.table$TN + auc.table$FP)
+# auc.table$FalsePosRate = 1 - auc.table$specificity
+# auc.table$sens_spec = auc.table$sensitivity + auc.table$specificity
+# auc.best = auc.table [auc.table$sens_spec == max (auc.table$sens_spec),]
+# auc.best
+# points (auc.best$FalsePosRate, auc.best$sensitivity, cex=1.3)
+```
+
+```{r}
+plot(perf1, lwd=2, col=2, main="ROC curve")
+abline(0,1)
+legend(0.6, 0.3, c(paste ("AUC=", round (auc1, 4), sep="")),   lwd=2, col=2)
+
+```
+
+The ROC curve suggests the predictive ability of this model is better than random guessing, since the AUC (0.9093) is larger than 0.5. The optimal cutoff for classification is a fitted probability of 0.728, which has a false positive rate (1 - specificity) of 0.098, and a true positive rate (sensitivity) of 0.833. That point is shown as a black circle on the ROC curve.
+
+```{r}
+# save the model
+saveRDS(fit3, file = "final_model.rds")
+```
+
+
